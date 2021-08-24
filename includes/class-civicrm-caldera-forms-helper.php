@@ -168,10 +168,11 @@ class CiviCRM_Caldera_Forms_Helper {
 	 */
 	public function get_wp_civi_contact( $id ) {
 
+    $domain_id = civicrm_api3('Domain', 'get', ['current_domain' => '', 'sequential' => 1])['values'][0]['id'];
 		$params = [
 			'sequential' => 1,
 			'uf_id' => $id,
-			'domain_id' => CRM_Core_BAO_Domain::getDomain()->id,
+			'domain_id' => $domain_id,
 		];
 
 		try {
@@ -282,12 +283,11 @@ class CiviCRM_Caldera_Forms_Helper {
 		// send data back if already retrieved
 		if ( isset( $this->states ) ) return $this->states;
 
-		$query = 'SELECT name,id,country_id FROM civicrm_state_province';
-		$dao = CRM_Core_DAO::executeQuery( $query );
+    $states = civicrm_api3('StateProvince', 'get', ['options' => ['limit' => 0]]);
 		$this->states = [];
 
-		while ( $dao->fetch() ) {
-			$this->states[$dao->id] = [ 'name' => $dao->name, 'country_id' => $dao->country_id ];
+	  foreach ($states['values'] as $state) {
+			$this->states[$state['id']] = [ 'name' => $state['name'], 'country_id' => $state['country_id'] ];
 		}
 
 		foreach ( $this->states as $state_id => $state ) {
@@ -328,10 +328,16 @@ class CiviCRM_Caldera_Forms_Helper {
 	 */
 	public function get_dedupe_rules() {
 
-		$dedupe_rules['Organization'] = CRM_Dedupe_BAO_RuleGroup::getByType( 'Organization' );
-		$dedupe_rules['Individual'] = CRM_Dedupe_BAO_RuleGroup::getByType( 'Individual' );
-		$dedupe_rules['Household'] = CRM_Dedupe_BAO_RuleGroup::getByType( 'Household' );
-
+    $contact_types = ['Organization', 'Individual', 'Household'];
+    $dedupe_rules = [];
+    foreach ($contact_types as $contact_type) {
+      $rules = [];
+      $ruleGroups = civicrm_api3('RuleGroup', 'get', ['contact_type' => $contact_type, 'options' => ['limit' => 0]]);
+      foreach ($ruleGroups['values'] as $ruleGroup) {
+        $rules[$ruleGroup['id']] = (!empty($ruleGroup['title']) ? $ruleGroup['title'] : (!empty($ruleGroup['name']) ? $ruleGroup['name'] : $contact_type)) . ' - ' . $ruleGroup['used'];
+      }
+      $dedupe_rules[$contact_type] = $rules;
+    }
 		return $dedupe_rules;
 
 	}
@@ -999,13 +1005,8 @@ class CiviCRM_Caldera_Forms_Helper {
 	 * @return int $contact_id The contact id
 	 */
 	public function civi_contact_dedupe( $contact, $contact_type, $dedupe_rule_id ) {
-		// Dupes params
-		$dedupeParams = CRM_Dedupe_Finder::formatParams( $contact, $contact_type );
-		$dedupeParams['check_permission'] = FALSE;
-
-		// Check dupes
-		$cids = CRM_Dedupe_Finder::dupesByParams( $dedupeParams, $contact_type, NULL, [], $dedupe_rule_id );
-		$cids = array_reverse( $cids );
+    $cids = civicrm_api3('Contact', 'GetDuplicates', ['contact' => json_encode($contact), 'contact_type' => $contact_type, 'dedupe_rule_id' => $dedupe_rule_id]);
+		$cids = array_reverse( $cids['contact_ids'] );
 
 		return $cids ? array_pop( $cids ) : 0;
 	}
@@ -1032,7 +1033,7 @@ class CiviCRM_Caldera_Forms_Helper {
 			$cs = $_GET['cs'];
 
 			// Check for valid checksum
-			$valid_user = CRM_Contact_BAO_Contact_Utils::validChecksum( $cid, $cs );
+			$valid_user = civicrm_api3('Checksum', 'validate', ['contact_id' => $cid, 'checksum' => $cs])['values'][$cid]['is_valid'];
 
 			if ( $valid_user )
 				$contact = $this->plugin->helper->get_civi_contact( $cid );
